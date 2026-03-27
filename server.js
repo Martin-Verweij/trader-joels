@@ -118,16 +118,28 @@ async function checkStockAnalysis(ticker) {
     const { status, raw } = await httpGet(pageUrl);
     if (status !== 200) return null;
 
-    // Look for "next estimated earnings date" — lives on the statistics page
+    // Search for earnings date phrases — statistics page has both confirmed and estimated
     const text = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const idx  = text.toLowerCase().indexOf('next estimated earnings date');
-    if (idx === -1) return null;
+    const lower = text.toLowerCase();
 
-    const snippet = text.slice(idx, idx + 120);
-    const found   = extractFutureDate(snippet);
-    if (found) {
-      console.log(`  ✓ estimate: ${found.raw} from stockanalysis.com`);
-      return { date: found.raw, confirmed: false, source: 'stockanalysis.com', url: pageUrl };
+    // Try phrases in order of specificity
+    const phrases = [
+      'next estimated earnings date',
+      'next earnings date',
+      'next earnings',
+      'upcoming earnings',
+    ];
+
+    for (const phrase of phrases) {
+      const idx = lower.indexOf(phrase);
+      if (idx === -1) continue;
+      const snippet = text.slice(idx, idx + 150);
+      const found   = extractFutureDate(snippet);
+      if (found) {
+        const isEstimate = phrase.includes('estimated') || phrase === 'next earnings';
+        console.log(`  ✓ ${isEstimate ? 'estimate' : 'confirmed'}: ${found.raw} from stockanalysis.com`);
+        return { date: found.raw, confirmed: !isEstimate, source: 'stockanalysis.com', url: pageUrl };
+      }
     }
   } catch(e) {
     console.warn(`  stockanalysis error: ${e.message}`);
