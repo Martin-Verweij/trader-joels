@@ -124,58 +124,67 @@ async function checkGoogleNews(name, ticker) {
   return null;
 }
 
-// ── 2. Fallback chain: Yahoo Finance → stockanalysis.com ──────────────────
+// ── 2. Fetch Yahoo + stockanalysis in parallel, return earliest date ──────
 async function checkStockAnalysis(ticker) {
-  // Yahoo Finance JSON API — returns earnings date as structured data, no JS rendering needed
-  const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents`;
-  console.log(`  Fallback Yahoo API: ${yahooUrl}`);
-  try {
-    const { status, raw } = await httpGet(yahooUrl, {
-      'Accept': 'application/json',
-      'Referer': 'https://finance.yahoo.com',
-    });
-    if (status === 200) {
-      const json = JSON.parse(raw);
-      const earnings = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
-      const dates = earnings?.earningsDate || [];
-      const now = new Date(); now.setHours(0,0,0,0);
-      for (const d of dates) {
-        const dt = new Date(d.raw * 1000);
-        if (dt >= now) {
-          const dateStr = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-          console.log(`  ✓ confirmed: ${dateStr} from Yahoo Finance API`);
-          return { date: dateStr, confirmed: true, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` };
-        }
-      }
-    }
-  } catch(e) {
-    console.warn(`  Yahoo Finance API error: ${e.message}`);
-  }
+  const now = new Date(); now.setHours(0,0,0,0);
+  const candidates = [];
 
-  // Try stockanalysis.com statistics page as second fallback
-  const saUrl = `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`;
-  console.log(`  Fallback stockanalysis: ${saUrl}`);
-  try {
-    const { status, raw } = await httpGet(saUrl);
-    if (status === 200) {
-      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      const lower = text.toLowerCase();
-      for (const phrase of ['next estimated earnings date', 'next earnings date', 'next earnings']) {
-        const idx = lower.indexOf(phrase);
-        if (idx === -1) continue;
-        const found = extractFutureDate(text.slice(idx, idx + 150));
-        if (found) {
-          const isEstimate = phrase.includes('estimated');
-          console.log(`  ✓ ${isEstimate ? 'estimate' : 'confirmed'}: ${found.raw} from stockanalysis.com`);
-          return { date: found.raw, confirmed: !isEstimate, source: 'stockanalysis.com', url: saUrl };
-        }
-      }
-    }
-  } catch(e) {
-    console.warn(`  stockanalysis error: ${e.message}`);
-  }
+  await Promise.all([
 
-  return null;
+    // Yahoo Finance JSON API
+    (async () => {
+      try {
+        const { status, raw } = await httpGet(
+          `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents`,
+          { 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com' }
+        );
+        if (status !== 200) return;
+        const json  = JSON.parse(raw);
+        const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate || [];
+        for (const d of dates) {
+          const dt = new Date(d.raw * 1000);
+          if (dt >= now) {
+            const str = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            candidates.push({ date: str, dt, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
+            console.log(`  Yahoo: ${str}`);
+          }
+        }
+      } catch(e) { console.warn(`  Yahoo error: ${e.message}`); }
+    })(),
+
+    // stockanalysis.com statistics page
+    (async () => {
+      try {
+        const saUrl = `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`;
+        const { status, raw } = await httpGet(saUrl);
+        if (status !== 200) return;
+        const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+        const lower = text.toLowerCase();
+        for (const phrase of ['next estimated earnings date', 'next earnings date', 'next earnings']) {
+          const idx = lower.indexOf(phrase);
+          if (idx === -1) continue;
+          const found = extractFutureDate(text.slice(idx, idx + 150));
+          if (found) {
+            const dt = new Date(found.raw);
+            if (!isNaN(dt) && dt >= now) {
+              candidates.push({ date: found.raw, dt, source: 'stockanalysis.com', url: saUrl });
+              console.log(`  stockanalysis: ${found.raw}`);
+            }
+            break;
+          }
+        }
+      } catch(e) { console.warn(`  stockanalysis error: ${e.message}`); }
+    })(),
+
+  ]);
+
+  if (!candidates.length) return null;
+
+  // Pick the earliest (lowest) date across both sources
+  candidates.sort((a, b) => a.dt - b.dt);
+  const pick = candidates[0];
+  console.log(`  ✓ estimate: ${pick.date} from ${pick.source} (earliest of ${candidates.length} candidate(s))`);
+  return { date: pick.date, confirmed: false, source: pick.source, url: pick.url };
 }
 
 // ── HTTP server ────────────────────────────────────────────────────────────
