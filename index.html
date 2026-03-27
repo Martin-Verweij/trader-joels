@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Trader Joël's</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0f0e; --surface: #131918; --surface2: #1c2423;
+    --border: #253130; --border2: #2e3d3b;
+    --accent: #00e5a0; --accent-dim: #00e5a015;
+    --text: #e8f0ef; --muted: #6b8986; --muted2: #4a6663;
+    --red: #ff4d6d; --yellow: #ffd166; --orange: #ff6b35;
+    --radius: 10px; --radius-sm: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Mono', monospace; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    padding: 20px 36px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg); position: sticky; top: 0; z-index: 10;
+  }
+  .logo { font-family: 'Fraunces', serif; font-size: 1.5rem; line-height: 1; display: flex; align-items: baseline; gap: 0.08em; }
+  .logo-trader { font-weight: 700; font-style: normal; color: var(--text); }
+  .logo-joels  { font-weight: 400; font-style: italic; color: var(--accent); }
+
+  .scan-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--accent); color: #000; border: none;
+    padding: 8px 20px; border-radius: 999px;
+    font-family: 'DM Mono', monospace; font-size: 0.72rem; font-weight: 500;
+    cursor: pointer; transition: opacity .2s;
+  }
+  .scan-btn:hover { opacity: .85; }
+  .scan-btn:disabled { opacity: .4; pointer-events: none; }
+  .spin { display: inline-block; }
+  .scan-btn.loading .spin { animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  main { flex: 1; display: grid; grid-template-columns: 280px 1fr; }
+
+  aside {
+    border-right: 1px solid var(--border);
+    height: calc(100vh - 65px); position: sticky; top: 65px;
+    overflow-y: auto; padding: 22px 16px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .label { font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted2); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .label-count { background: var(--surface2); border: 1px solid var(--border2); color: var(--muted); padding: 1px 6px; border-radius: 999px; font-size: 0.58rem; }
+
+  .add-form { display: flex; flex-direction: column; gap: 6px; }
+  .add-form input {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 11px; border-radius: var(--radius-sm);
+    font-family: 'DM Mono', monospace; font-size: 0.78rem;
+    outline: none; transition: border .2s; width: 100%;
+  }
+  .add-form input:focus { border-color: var(--accent); }
+  .add-form input::placeholder { color: var(--muted2); font-size: 0.68rem; }
+  .btn-add {
+    background: var(--surface2); border: 1px solid var(--border2);
+    color: var(--accent); padding: 7px; border-radius: var(--radius-sm);
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    cursor: pointer; transition: all .15s; text-align: center;
+  }
+  .btn-add:hover { border-color: var(--accent); background: var(--accent-dim); }
+
+  .company-list { display: flex; flex-direction: column; gap: 5px; }
+  .co-item {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    animation: slideIn .2s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateX(-5px)} to{opacity:1;transform:none} }
+  .co-name   { font-size: 0.8rem; }
+  .co-ticker { font-size: 0.7rem; color: var(--accent); margin-top: 1px; }
+  .btn-x { background: none; border: none; color: var(--muted2); cursor: pointer; font-size: 0.72rem; padding: 2px 5px; border-radius: 3px; transition: all .15s; }
+  .btn-x:hover { color: var(--red); background: #ff4d6d15; }
+
+  /* ntfy section */
+  .ntfy-section { display: flex; flex-direction: column; gap: 6px; }
+  .ntfy-section input {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 11px; border-radius: var(--radius-sm);
+    font-family: 'DM Mono', monospace; font-size: 0.75rem;
+    outline: none; transition: border .2s; width: 100%;
+  }
+  .ntfy-section input:focus { border-color: var(--accent); }
+  .ntfy-section input::placeholder { color: var(--muted2); font-size: 0.68rem; }
+  .btn-test {
+    background: none; border: 1px solid var(--border2); color: var(--muted);
+    padding: 6px; border-radius: var(--radius-sm);
+    font-family: 'DM Mono', monospace; font-size: 0.68rem;
+    cursor: pointer; transition: all .15s; text-align: center;
+  }
+  .btn-test:hover { border-color: var(--accent); color: var(--accent); }
+  .ntfy-hint { font-size: 0.6rem; color: var(--muted2); line-height: 1.6; }
+
+  /* main content */
+  .content { padding: 28px 32px; display: flex; flex-direction: column; gap: 16px; }
+  .scan-status { font-size: 0.65rem; color: var(--muted2); }
+  .scan-status.active { color: var(--accent); }
+
+  /* results table */
+  .results-table { display: flex; flex-direction: column; gap: 8px; }
+
+  .result-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 180px 110px;
+    align-items: center; gap: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 20px;
+    animation: fadeUp .2s ease both;
+    transition: border-color .15s;
+  }
+  .result-row:hover { border-color: var(--border2); }
+  .result-row.confirmed { border-left: 3px solid var(--accent); }
+  .result-row.estimated { border-left: 3px solid var(--yellow); }
+  .result-row.not-found { border-left: 3px solid var(--border2); opacity: .6; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+
+  .r-ticker { font-size: 0.9rem; font-weight: 500; color: var(--accent); }
+  .r-name   { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+
+  .r-date {
+    font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 700;
+    color: var(--text); line-height: 1;
+  }
+  .r-date.not-found { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--muted2); font-weight: 400; }
+
+  .r-source { font-size: 0.62rem; color: var(--muted2); margin-top: 4px; }
+  .r-source a { color: var(--muted); text-decoration: none; }
+  .r-source a:hover { color: var(--accent); }
+
+  .r-badge {
+    font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 4px; border: 1px solid;
+    font-weight: 500; white-space: nowrap; justify-self: end;
+  }
+  .badge-confirmed { color: var(--accent);  border-color: var(--accent)40;  background: var(--accent-dim); }
+  .badge-estimated { color: var(--yellow); border-color: var(--yellow)40; background: #ffd16615; }
+  .badge-not-found { color: var(--muted2); border-color: var(--border2);  background: transparent; }
+
+  .empty { text-align: center; padding: 80px 20px; color: var(--muted); }
+  .empty-icon { font-size: 2rem; margin-bottom: 12px; }
+  .empty p { font-size: 0.75rem; line-height: 1.7; }
+  .empty strong { color: var(--text); }
+
+  .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 7px; z-index: 999; }
+  .toast { background: var(--surface2); border: 1px solid var(--border2); border-left: 3px solid var(--accent); color: var(--text); padding: 10px 15px; border-radius: var(--radius); font-size: 0.7rem; max-width: 300px; animation: toastIn .2s ease; }
+  .toast.err { border-left-color: var(--red); }
+  @keyframes toastIn { from{opacity:0;transform:translateX(14px)} to{opacity:1;transform:none} }
+
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; }
+    aside { position: static; height: auto; }
+    .result-row { grid-template-columns: 70px 1fr; }
+    .r-source, .r-badge { grid-column: 2; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="logo-trader">Trader</span><span class="logo-joels">Joël's</span></div>
+  <button class="scan-btn" id="scanBtn" onclick="runScan()">
+    <span class="spin">↻</span>&nbsp; Scan
+  </button>
+</header>
+
+<main>
+  <aside>
+    <div>
+      <div class="label">Watchlist <span class="label-count" id="coCount">0</span></div>
+      <div class="add-form">
+        <input type="text" id="inName" placeholder="Company name"
+          onkeydown="if(event.key==='Enter') document.getElementById('inTicker').focus()"/>
+        <input type="text" id="inTicker" placeholder="Ticker, e.g. KOPN"
+          style="text-transform:uppercase"
+          onkeydown="if(event.key==='Enter') addCompany()"/>
+        <button class="btn-add" onclick="addCompany()">+ Add</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="label">Watchlist</div>
+      <div class="company-list" id="companyList"></div>
+    </div>
+
+    <div class="ntfy-section">
+      <div class="label">Phone alerts (ntfy.sh)</div>
+      <input type="text" id="ntfyTopic" placeholder="Your ntfy topic" oninput="saveTopic()"/>
+      <button class="btn-test" onclick="testNotif()">Send test</button>
+      <div class="ntfy-hint">Install the <strong>ntfy</strong> app → subscribe to your topic → get alerts after each scan.</div>
+    </div>
+  </aside>
+
+  <div class="content">
+    <div class="scan-status" id="scanStatus">Add companies and click Scan</div>
+    <div id="resultsWrap">
+      <div class="empty">
+        <div class="empty-icon">📅</div>
+        <p>Add companies to your watchlist,<br>then click <strong>Scan</strong>.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+// Auto-detect: use relative URL when hosted, localhost when running locally
+const API = window.location.hostname === 'localhost' ? 'http://localhost:3456' : '';
+
+let companies = JSON.parse(localStorage.getItem('tj_companies') || 'null') || [
+  { id: uid(), name: 'Kopin Corp', ticker: 'KOPN' },
+  { id: uid(), name: 'Momentus',   ticker: 'MNTS' },
+];
+
+window.onload = () => {
+  renderSidebar();
+  const t = localStorage.getItem('tj_ntfy');
+  if (t) document.getElementById('ntfyTopic').value = t;
+};
+
+// ── COMPANIES ──────────────────────────────────────────────────────────────
+function addCompany() {
+  const name   = document.getElementById('inName').value.trim();
+  const ticker = document.getElementById('inTicker').value.trim().toUpperCase().replace(/[^A-Z]/g,'');
+  if (!name || !ticker) { toast('Enter both name and ticker', 'err'); return; }
+  if (companies.find(c => c.ticker === ticker)) { toast(`${ticker} already in watchlist`, 'err'); return; }
+  companies.push({ id: uid(), name, ticker });
+  save(); renderSidebar();
+  document.getElementById('inName').value   = '';
+  document.getElementById('inTicker').value = '';
+  toast(`Added ${ticker}`);
+}
+
+function removeCompany(id) {
+  companies = companies.filter(c => c.id !== id);
+  save(); renderSidebar();
+}
+
+function renderSidebar() {
+  document.getElementById('coCount').textContent = companies.length;
+  const el = document.getElementById('companyList');
+  if (!companies.length) { el.innerHTML = '<div style="font-size:.65rem;color:var(--muted2)">Empty.</div>'; return; }
+  el.innerHTML = companies.map(c => `
+    <div class="co-item">
+      <div>
+        <div class="co-name">${esc(c.name)}</div>
+        <div class="co-ticker">${esc(c.ticker)}</div>
+      </div>
+      <button class="btn-x" onclick="removeCompany('${c.id}')">✕</button>
+    </div>`).join('');
+}
+
+// ── SCAN ───────────────────────────────────────────────────────────────────
+async function runScan() {
+  if (!companies.length) { toast('Add companies first', 'err'); return; }
+  const btn    = document.getElementById('scanBtn');
+  const status = document.getElementById('scanStatus');
+  btn.disabled = true; btn.classList.add('loading');
+  status.textContent = `Scanning ${companies.length} companies…`;
+  status.classList.add('active');
+
+  try {
+    const res  = await fetch(`${API}/api/scan`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companies }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    status.textContent = `Last scan: ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`;
+    status.classList.remove('active');
+    renderResults(data.results);
+
+    // Notify confirmed dates
+    const confirmed = data.results.filter(r => r.date && r.confirmed);
+    for (const r of confirmed) notifyDate(r);
+  } catch(e) {
+    status.textContent = 'Scan failed';
+    status.classList.remove('active');
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false; btn.classList.remove('loading');
+  }
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────
+function renderResults(results) {
+  const wrap = document.getElementById('resultsWrap');
+  if (!results.length) { wrap.innerHTML = ''; return; }
+
+  wrap.innerHTML = `<div class="results-table">${results.map((r, i) => {
+    const hasDate = !!r.date;
+    const rowCls  = !hasDate ? 'not-found' : r.confirmed ? 'confirmed' : 'estimated';
+    const badge   = !hasDate
+      ? `<span class="r-badge badge-not-found">No date found</span>`
+      : r.confirmed
+        ? `<span class="r-badge badge-confirmed">Confirmed</span>`
+        : `<span class="r-badge badge-estimated">Analyst est.</span>`;
+
+    const dateEl = hasDate
+      ? `<div class="r-date">${esc(r.date)}</div>
+         <div class="r-source">${r.url ? `<a href="${esc(r.url)}" target="_blank">↗ source</a>` : esc(r.source||'')}</div>`
+      : `<div class="r-date not-found">—</div>`;
+
+    return `<div class="result-row ${rowCls}" style="animation-delay:${i*50}ms">
+      <div>
+        <div class="r-ticker">${esc(r.ticker)}</div>
+        <div class="r-name">${esc(r.company)}</div>
+      </div>
+      ${dateEl}
+      ${badge}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ── NTFY ───────────────────────────────────────────────────────────────────
+function saveTopic() { localStorage.setItem('tj_ntfy', document.getElementById('ntfyTopic').value.trim()); }
+
+async function notifyDate(r) {
+  const topic = document.getElementById('ntfyTopic').value.trim();
+  if (!topic) return;
+  await fetch(`${API}/api/notify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic, title: `📅 ${r.ticker} earnings: ${r.date}`, message: r.source || '', url: r.url || '' }),
+  }).catch(() => {});
+}
+
+async function testNotif() {
+  const topic = document.getElementById('ntfyTopic').value.trim();
+  if (!topic) { toast('Enter a ntfy topic first', 'err'); return; }
+  await fetch(`${API}/api/notify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic, title: 'Trader Joël\'s — test', message: 'Notifications are working!' }),
+  });
+  toast('Test sent → check your phone');
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────
+function uid()  { return Math.random().toString(36).slice(2,9); }
+function save() { localStorage.setItem('tj_companies', JSON.stringify(companies)); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function toast(msg, type='ok') {
+  const c = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast${type==='err'?' err':''}`; el.textContent = msg; c.appendChild(el);
+  setTimeout(() => { el.style.transition='opacity .3s'; el.style.opacity='0'; setTimeout(()=>el.remove(),320); }, 3500);
+}
+</script>
+</body>
+</html>
