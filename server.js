@@ -112,26 +112,30 @@ async function checkGoogleNews(name, ticker) {
 
 // ── 2. Fallback chain: Yahoo Finance → stockanalysis.com ──────────────────
 async function checkStockAnalysis(ticker) {
-  // Try Yahoo Finance first — embeds earnings date directly in raw HTML
-  const yahooUrl = `https://finance.yahoo.com/quote/${ticker}/`;
-  console.log(`  Fallback Yahoo: ${yahooUrl}`);
+  // Yahoo Finance JSON API — returns earnings date as structured data, no JS rendering needed
+  const yahooUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents`;
+  console.log(`  Fallback Yahoo API: ${yahooUrl}`);
   try {
-    const { status, raw } = await httpGet(yahooUrl, { 'Accept-Language': 'en-US,en;q=0.9' });
+    const { status, raw } = await httpGet(yahooUrl, {
+      'Accept': 'application/json',
+      'Referer': 'https://finance.yahoo.com',
+    });
     if (status === 200) {
-      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      const lower = text.toLowerCase();
-      const idx   = lower.indexOf('earnings date');
-      if (idx !== -1) {
-        const snippet = text.slice(idx, idx + 80);
-        const found   = extractFutureDate(snippet);
-        if (found) {
-          console.log(`  ✓ confirmed: ${found.raw} from Yahoo Finance`);
-          return { date: found.raw, confirmed: true, source: 'Yahoo Finance', url: yahooUrl };
+      const json = JSON.parse(raw);
+      const earnings = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
+      const dates = earnings?.earningsDate || [];
+      const now = new Date(); now.setHours(0,0,0,0);
+      for (const d of dates) {
+        const dt = new Date(d.raw * 1000);
+        if (dt >= now) {
+          const dateStr = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          console.log(`  ✓ confirmed: ${dateStr} from Yahoo Finance API`);
+          return { date: dateStr, confirmed: true, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` };
         }
       }
     }
   } catch(e) {
-    console.warn(`  Yahoo Finance error: ${e.message}`);
+    console.warn(`  Yahoo Finance API error: ${e.message}`);
   }
 
   // Try stockanalysis.com statistics page as second fallback
