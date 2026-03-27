@@ -151,6 +151,55 @@
   .empty p { font-size: 0.75rem; line-height: 1.7; }
   .empty strong { color: var(--text); }
 
+  /* section headers */
+  .section-hdr {
+    font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted2); display: flex; align-items: center; gap: 10px; margin-top: 8px;
+  }
+  .section-hdr::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* filing type filter toggles */
+  .filter-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ftoggle {
+    font-size: 0.65rem; padding: 4px 12px; border-radius: 4px;
+    border: 1px solid var(--border2); color: var(--muted);
+    background: transparent; cursor: pointer; font-family: 'DM Mono', monospace;
+    transition: all .15s;
+  }
+  .ftoggle:hover { border-color: var(--accent); color: var(--accent); }
+  .ftoggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .ftoggle.on-8k  { border-color: #7b9ef0; color: #7b9ef0; background: #7b9ef015; }
+  .ftoggle.on-10k { border-color: var(--yellow); color: var(--yellow); background: #ffd16615; }
+  .ftoggle.on-10q { border-color: var(--orange); color: var(--orange); background: #ff6b3515; }
+
+  /* filings table */
+  .filings-table { display: flex; flex-direction: column; gap: 6px; }
+  .filing-row {
+    display: grid; grid-template-columns: 70px 60px 1fr 100px;
+    align-items: center; gap: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 11px 18px;
+    animation: fadeUp .2s ease both; transition: border-color .15s;
+  }
+  .filing-row:hover { border-color: var(--border2); }
+  .filing-row.t-8k  { border-left: 3px solid #7b9ef0; }
+  .filing-row.t-10k { border-left: 3px solid var(--yellow); }
+  .filing-row.t-10q { border-left: 3px solid var(--orange); }
+  .f-ticker { font-size: 0.82rem; font-weight: 500; color: var(--accent); }
+  .f-name   { font-size: 0.6rem; color: var(--muted); margin-top: 1px; }
+  .f-type-badge {
+    font-size: 0.6rem; padding: 2px 8px; border-radius: 4px;
+    font-weight: 500; border: 1px solid; text-align: center;
+  }
+  .fb-8k  { color: #7b9ef0; border-color: #7b9ef040; background: #7b9ef015; }
+  .fb-10k { color: var(--yellow); border-color: var(--yellow)40; background: #ffd16615; }
+  .fb-10q { color: var(--orange); border-color: var(--orange)40; background: #ff6b3515; }
+  .f-desc { font-size: 0.68rem; color: var(--muted); }
+  .f-date { font-size: 0.72rem; color: var(--text); text-align: right; }
+  .f-link { font-size: 0.62rem; color: var(--muted2); margin-top: 2px; text-align: right; }
+  .f-link a { color: var(--muted); text-decoration: none; }
+  .f-link a:hover { color: var(--accent); }
+
   .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 7px; z-index: 999; }
   .toast { background: var(--surface2); border: 1px solid var(--border2); border-left: 3px solid var(--accent); color: var(--text); padding: 10px 15px; border-radius: var(--radius); font-size: 0.7rem; max-width: 300px; animation: toastIn .2s ease; }
   .toast.err { border-left-color: var(--red); }
@@ -198,6 +247,15 @@
       <button class="btn-test" onclick="testNotif()">Send test</button>
       <div class="ntfy-hint">Install the <strong>ntfy</strong> app → subscribe to your topic → get alerts after each scan.</div>
     </div>
+
+    <div>
+      <div class="label">SEC filings</div>
+      <div class="filter-toggles">
+        <button class="ftoggle on-8k"  id="tog-8K"  onclick="toggleType('8-K')">8-K</button>
+        <button class="ftoggle on-10k" id="tog-10K" onclick="toggleType('10-K')">10-K</button>
+        <button class="ftoggle on-10q" id="tog-10Q" onclick="toggleType('10-Q')">10-Q</button>
+      </div>
+    </div>
   </aside>
 
   <div class="content">
@@ -208,6 +266,7 @@
         <p>Add companies to your watchlist,<br>then click <strong>Scan</strong>.</p>
       </div>
     </div>
+    <div id="filingsWrap"></div>
   </div>
 </main>
 
@@ -222,8 +281,13 @@ let companies = JSON.parse(localStorage.getItem('tj_companies') || 'null') || [
   { id: uid(), name: 'Momentus',   ticker: 'MNTS' },
 ];
 
+// Filing type filter state
+let activeTypes = JSON.parse(localStorage.getItem('tj_types') || '["8-K","10-K","10-Q"]');
+let lastFilings = [];
+
 window.onload = () => {
   renderSidebar();
+  renderTypeToggles();
   const t = localStorage.getItem('tj_ntfy');
   if (t) document.getElementById('ntfyTopic').value = t;
 };
@@ -260,6 +324,27 @@ function renderSidebar() {
     </div>`).join('');
 }
 
+// ── FILING TYPE TOGGLES ────────────────────────────────────────────────────
+function toggleType(type) {
+  if (activeTypes.includes(type)) {
+    if (activeTypes.length === 1) return; // keep at least one
+    activeTypes = activeTypes.filter(t => t !== type);
+  } else {
+    activeTypes.push(type);
+  }
+  localStorage.setItem('tj_types', JSON.stringify(activeTypes));
+  renderTypeToggles();
+  renderFilings(lastFilings); // re-render with new filter
+}
+
+function renderTypeToggles() {
+  [['8-K','8k'],['10-K','10k'],['10-Q','10q']].forEach(([type, cls]) => {
+    const btn = document.getElementById(`tog-${type}`);
+    if (!btn) return;
+    btn.className = `ftoggle${activeTypes.includes(type) ? ` on-${cls}` : ''}`;
+  });
+}
+
 // ── SCAN ───────────────────────────────────────────────────────────────────
 async function runScan() {
   if (!companies.length) { toast('Add companies first', 'err'); return; }
@@ -270,19 +355,33 @@ async function runScan() {
   status.classList.add('active');
 
   try {
-    const res  = await fetch(`${API}/api/scan`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companies }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
+    // Run earnings scan and filings fetch in parallel
+    const [earningsRes, filingsRes] = await Promise.all([
+      fetch(`${API}/api/scan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companies }),
+      }),
+      fetch(`${API}/api/filings`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companies, types: ['8-K','10-K','10-Q'] }),
+      }),
+    ]);
+
+    const earningsData = await earningsRes.json();
+    const filingsData  = await filingsRes.json();
+
+    if (!earningsRes.ok) throw new Error(earningsData.error);
 
     status.textContent = `Last scan: ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`;
     status.classList.remove('active');
-    renderResults(data.results);
+
+    renderResults(earningsData.results);
+
+    lastFilings = filingsData.results || [];
+    renderFilings(lastFilings);
 
     // Notify confirmed dates
-    const confirmed = data.results.filter(r => r.date && r.confirmed);
+    const confirmed = earningsData.results.filter(r => r.date && r.confirmed);
     for (const r of confirmed) notifyDate(r);
   } catch(e) {
     status.textContent = 'Scan failed';
@@ -321,6 +420,45 @@ function renderResults(results) {
       ${badge}
     </div>`;
   }).join('')}</div>`;
+}
+
+// ── RENDER FILINGS ─────────────────────────────────────────────────────────
+function renderFilings(results) {
+  const wrap = document.getElementById('filingsWrap');
+  if (!results.length) { wrap.innerHTML = ''; return; }
+
+  // Flatten all filings, filter by active types, sort by date desc
+  const all = results.flatMap(r =>
+    (r.filings || [])
+      .filter(f => activeTypes.includes(f.type))
+      .map(f => ({ ...f, company: r.company, ticker: r.ticker }))
+  ).sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!all.length) {
+    wrap.innerHTML = `<div class="section-hdr">SEC Filings</div>
+      <div style="font-size:.7rem;color:var(--muted2);padding:12px 0">No filings match the selected types.</div>`;
+    return;
+  }
+
+  const typeCls = { '8-K': 't-8k', '10-K': 't-10k', '10-Q': 't-10q' };
+  const badgeCls = { '8-K': 'fb-8k', '10-K': 'fb-10k', '10-Q': 'fb-10q' };
+
+  wrap.innerHTML = `
+    <div class="section-hdr">SEC Filings</div>
+    <div class="filings-table">${all.map((f, i) => `
+      <div class="filing-row ${typeCls[f.type] || ''}" style="animation-delay:${i*30}ms">
+        <div>
+          <div class="f-ticker">${esc(f.ticker)}</div>
+          <div class="f-name">${esc(f.company)}</div>
+        </div>
+        <div><span class="f-type-badge ${badgeCls[f.type] || ''}">${esc(f.type)}</span></div>
+        <div class="f-desc">${esc(f.desc)}</div>
+        <div>
+          <div class="f-date">${esc(f.date)}</div>
+          <div class="f-link"><a href="${esc(f.link)}" target="_blank">↗ EDGAR</a></div>
+        </div>
+      </div>`).join('')}
+    </div>`;
 }
 
 // ── NTFY ───────────────────────────────────────────────────────────────────

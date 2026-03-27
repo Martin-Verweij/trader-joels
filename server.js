@@ -236,6 +236,80 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /api/filings  body: { companies: [{name, ticker}], types: ['8-K','10-K','10-Q'] }
+  // Uses SEC EDGAR — free, no key needed
+  if (pathname === '/api/filings' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      const { companies, types = ['8-K','10-K','10-Q'] } = JSON.parse(body);
+      const results = [];
+
+      // Load SEC ticker→CIK map (cached after first call)
+      if (!global.cikMap) {
+        console.log('Loading SEC CIK map...');
+        try {
+          const { raw } = await httpGet('https://www.sec.gov/files/company_tickers.json', {
+            'User-Agent': 'TraderJoels/1.0 contact@example.com',
+            'Accept': 'application/json',
+          });
+          const data = JSON.parse(raw);
+          global.cikMap = {};
+          for (const e of Object.values(data)) {
+            global.cikMap[e.ticker.toUpperCase()] = String(e.cik_str).padStart(10, '0');
+          }
+          console.log(`Loaded ${Object.keys(global.cikMap).length} tickers`);
+        } catch(e) {
+          send(502, { error: `Could not load SEC CIK map: ${e.message}` }); return;
+        }
+      }
+
+      for (const co of companies) {
+        const cik = global.cikMap[co.ticker.toUpperCase()];
+        if (!cik) {
+          results.push({ company: co.name, ticker: co.ticker, filings: [], error: 'Ticker not found in SEC database' });
+          continue;
+        }
+        try {
+          const { raw } = await httpGet(`https://data.sec.gov/submissions/CIK${cik}.json`, {
+            'User-Agent': 'TraderJoels/1.0 contact@example.com',
+            'Accept': 'application/json',
+          });
+          const data   = JSON.parse(raw);
+          const recent = data.filings?.recent;
+          if (!recent) { results.push({ company: co.name, ticker: co.ticker, filings: [] }); continue; }
+
+          const filings = [];
+          const forms   = recent.form                  || [];
+          const dates   = recent.filingDate            || [];
+          const accNums = recent.accessionNumber       || [];
+          const docs    = recent.primaryDocument       || [];
+          const descs   = recent.primaryDocDescription || [];
+
+          for (let i = 0; i < forms.length && filings.length < 20; i++) {
+            if (!types.includes(forms[i])) continue;
+            const acc  = accNums[i].replace(/-/g, '');
+            const cikN = parseInt(cik, 10);
+            const link = docs[i]
+              ? `https://www.sec.gov/Archives/edgar/data/${cikN}/${acc}/${docs[i]}`
+              : `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=${forms[i]}&count=10`;
+            filings.push({
+              type:    forms[i],
+              date:    dates[i],
+              desc:    descs[i] || (forms[i] === '10-K' ? 'Annual report' : forms[i] === '10-Q' ? 'Quarterly report' : 'Current report'),
+              link,
+            });
+          }
+          results.push({ company: co.name, ticker: co.ticker, filings });
+        } catch(e) {
+          results.push({ company: co.name, ticker: co.ticker, filings: [], error: e.message });
+        }
+      }
+      send(200, { results });
+    });
+    return;
+  }
+
   // POST /api/notify
   if (pathname === '/api/notify' && req.method === 'POST') {
     let body = '';
