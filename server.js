@@ -102,56 +102,51 @@ function extractFutureDate(text) {
   return earliest;
 }
 
-// ── 1. Google News RSS ─────────────────────────────────────────────────────
-async function checkGoogleNews(name, ticker) {
-  const queries = [`"${name}" earnings call`, `${ticker} earnings call`];
-
-  for (const q of queries) {
-    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
-    console.log(`  RSS: ${q}`);
-    try {
-      const { status, raw } = await httpGet(rssUrl);
-      if (status !== 200) continue;
-      const items = parseRSS(raw);
-
-      // Pass 1: article explicitly announces an upcoming call
-      for (const item of items) {
-        const title = item.title.toLowerCase();
-        if (SKIP_PHRASES.some(p => title.includes(p))) continue;
-        if (!UPCOMING_PHRASES.some(p => title.includes(p))) continue;
-        const found = extractFutureDate(item.title);
-        if (found) {
-          console.log(`  ✓ confirmed: ${found.raw} via "${item.title}"`);
-          return { date: found.raw, confirmed: true, source: item.title, url: item.link };
-        }
-      }
-
-      // Pass 2: any earnings article with a future date in the title
-      for (const item of items) {
-        const title = item.title.toLowerCase();
-        if (SKIP_PHRASES.some(p => title.includes(p))) continue;
-        if (!title.includes('earning')) continue;
-        const found = extractFutureDate(item.title);
-        if (found) {
-          console.log(`  ~ date in title: ${found.raw} via "${item.title}"`);
-          return { date: found.raw, confirmed: false, source: item.title, url: item.link };
-        }
-      }
-    } catch(e) {
-      console.warn(`  RSS error: ${e.message}`);
-    }
-  }
-  return null;
-}
-
-// ── 2. Yahoo Finance API + stockanalysis.com in parallel ───────────────────
-async function checkStockAnalysis(ticker) {
+// ── Run all sources in parallel, return earliest future date ──────────────
+async function findNextEarnings(name, ticker) {
   const now = new Date(); now.setHours(0,0,0,0);
   const candidates = [];
 
   await Promise.all([
 
-    // Yahoo Finance JSON API
+    // ── Google News RSS ──────────────────────────────────────────────────
+    (async () => {
+      const queries = [`"${name}" earnings call`, `${ticker} earnings call`];
+      for (const q of queries) {
+        try {
+          const { status, raw } = await httpGet(
+            `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`
+          );
+          if (status !== 200) continue;
+          const items = parseRSS(raw);
+
+          // Pass 1: explicit upcoming announcement
+          for (const item of items) {
+            const title = item.title.toLowerCase();
+            if (SKIP_PHRASES.some(p => title.includes(p))) continue;
+            if (!UPCOMING_PHRASES.some(p => title.includes(p))) continue;
+            const found = extractFutureDate(item.title);
+            if (found) {
+              console.log(`  RSS confirmed: ${found.raw} — "${item.title}"`);
+              candidates.push({ date: found.raw, dt: found.date, confirmed: true, source: item.title, url: item.link });
+            }
+          }
+          // Pass 2: any earnings title with a future date
+          for (const item of items) {
+            const title = item.title.toLowerCase();
+            if (SKIP_PHRASES.some(p => title.includes(p))) continue;
+            if (!title.includes('earning')) continue;
+            const found = extractFutureDate(item.title);
+            if (found) {
+              console.log(`  RSS date: ${found.raw} — "${item.title}"`);
+              candidates.push({ date: found.raw, dt: found.date, confirmed: false, source: item.title, url: item.link });
+            }
+          }
+        } catch(e) { console.warn(`  RSS error: ${e.message}`); }
+      }
+    })(),
+
+    // ── Yahoo Finance JSON API ───────────────────────────────────────────
     (async () => {
       try {
         const { status, raw } = await httpGet(
@@ -165,34 +160,32 @@ async function checkStockAnalysis(ticker) {
           const dt = new Date(d.raw * 1000);
           if (dt >= now) {
             const str = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-            candidates.push({ date: str, dt, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
+            candidates.push({ date: str, dt, confirmed: false, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
             console.log(`  Yahoo API: ${str}`);
           }
         }
       } catch(e) {
-        // JSON API failed — try scraping Yahoo HTML for embedded earningsDate
-        console.warn(`  Yahoo API failed (${e.message}), trying HTML`);
+        // Fallback: scrape Yahoo HTML for embedded earningsDate JSON
         try {
           const { status, raw } = await httpGet(
             `https://finance.yahoo.com/quote/${ticker}/`,
             { 'Accept-Language': 'en-US,en;q=0.9' }
           );
           if (status === 200) {
-            const matches = [...raw.matchAll(/"earningsDate":\["(\d{4}-\d{2}-\d{2})"/g)];
-            for (const m of matches) {
+            for (const m of raw.matchAll(/"earningsDate":\["(\d{4}-\d{2}-\d{2})"/g)) {
               const dt = new Date(m[1]);
               if (dt >= now) {
                 const str = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-                candidates.push({ date: str, dt, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
+                candidates.push({ date: str, dt, confirmed: false, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
                 console.log(`  Yahoo HTML: ${str}`);
               }
             }
           }
-        } catch(e2) { console.warn(`  Yahoo HTML failed: ${e2.message}`); }
+        } catch(_) {}
       }
     })(),
 
-    // stockanalysis.com statistics page
+    // ── stockanalysis.com ────────────────────────────────────────────────
     (async () => {
       try {
         const saUrl = `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`;
@@ -207,7 +200,7 @@ async function checkStockAnalysis(ticker) {
           if (found) {
             const dt = new Date(found.raw);
             if (!isNaN(dt) && dt >= now) {
-              candidates.push({ date: found.raw, dt, source: 'stockanalysis.com', url: saUrl });
+              candidates.push({ date: found.raw, dt, confirmed: false, source: 'stockanalysis.com', url: saUrl });
               console.log(`  stockanalysis: ${found.raw}`);
             }
             break;
@@ -219,10 +212,12 @@ async function checkStockAnalysis(ticker) {
   ]);
 
   if (!candidates.length) return null;
+
+  // Always pick the earliest future date across all sources
   candidates.sort((a, b) => a.dt - b.dt);
   const pick = candidates[0];
-  console.log(`  ✓ estimate: ${pick.date} from ${pick.source}`);
-  return { date: pick.date, confirmed: false, source: pick.source, url: pick.url };
+  console.log(`  → picked: ${pick.date} from ${pick.source} (${candidates.length} candidate(s): ${candidates.map(c=>c.date).join(', ')})`);
+  return { date: pick.date, confirmed: pick.confirmed, source: pick.source, url: pick.url };
 }
 
 // ── HTTP server ────────────────────────────────────────────────────────────
@@ -262,8 +257,7 @@ const server = http.createServer(async (req, res) => {
       for (const co of companies) {
         console.log(`\nChecking: ${co.name} (${co.ticker})`);
         try {
-          let result = await checkGoogleNews(co.name, co.ticker);
-          if (!result) result = await checkStockAnalysis(co.ticker);
+          let result = await findNextEarnings(co.name, co.ticker);
           results.push({
             company:   co.name,   ticker:    co.ticker,
             date:      result?.date      || null,
