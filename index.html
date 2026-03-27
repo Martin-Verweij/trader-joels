@@ -162,15 +162,25 @@
   .filter-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
   .ftoggle {
     font-size: 0.65rem; padding: 4px 12px; border-radius: 4px;
-    border: 1px solid var(--border2); color: var(--muted);
+    border: 1px solid var(--border); color: var(--muted2);
     background: transparent; cursor: pointer; font-family: 'DM Mono', monospace;
-    transition: all .15s;
+    transition: all .15s; opacity: 0.45; position: relative;
   }
-  .ftoggle:hover { border-color: var(--accent); color: var(--accent); }
-  .ftoggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-  .ftoggle.on-8k  { border-color: #7b9ef0; color: #7b9ef0; background: #7b9ef015; }
-  .ftoggle.on-10k { border-color: var(--yellow); color: var(--yellow); background: #ffd16615; }
-  .ftoggle.on-10q { border-color: var(--orange); color: var(--orange); background: #ff6b3515; }
+  .ftoggle:hover { opacity: 0.8; }
+  .ftoggle.on-8k  { border-color: #7b9ef0; color: #7b9ef0; background: #7b9ef015; opacity: 1; }
+  .ftoggle.on-10k { border-color: var(--yellow); color: var(--yellow); background: #ffd16615; opacity: 1; }
+  .ftoggle.on-10q { border-color: var(--orange); color: var(--orange); background: #ff6b3515; opacity: 1; }
+
+  /* per-stock ticker filters */
+  .ticker-filters { display: flex; gap: 5px; flex-wrap: wrap; }
+  .tfilt {
+    font-size: 0.65rem; padding: 3px 10px; border-radius: 4px;
+    border: 1px solid var(--border); color: var(--muted2);
+    background: transparent; cursor: pointer; font-family: 'DM Mono', monospace;
+    transition: all .15s; opacity: 0.45;
+  }
+  .tfilt:hover { opacity: 0.8; }
+  .tfilt.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); opacity: 1; }
 
   /* filings table */
   .filings-table { display: flex; flex-direction: column; gap: 6px; }
@@ -249,11 +259,18 @@
     </div>
 
     <div>
-      <div class="label">SEC filings</div>
+      <div class="label">SEC filing types</div>
       <div class="filter-toggles">
         <button class="ftoggle on-8k"  id="tog-8K"  onclick="toggleType('8-K')">8-K</button>
         <button class="ftoggle on-10k" id="tog-10K" onclick="toggleType('10-K')">10-K</button>
         <button class="ftoggle on-10q" id="tog-10Q" onclick="toggleType('10-Q')">10-Q</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="label">Filter by stock</div>
+      <div class="ticker-filters" id="tickerFilters">
+        <div style="font-size:.65rem;color:var(--muted2)">Add companies first</div>
       </div>
     </div>
   </aside>
@@ -281,13 +298,16 @@ let companies = JSON.parse(localStorage.getItem('tj_companies') || 'null') || [
   { id: uid(), name: 'Momentus',   ticker: 'MNTS' },
 ];
 
-// Filing type filter state
-let activeTypes = JSON.parse(localStorage.getItem('tj_types') || '["8-K","10-K","10-Q"]');
-let lastFilings = [];
+// Filter state
+let activeTypes   = JSON.parse(localStorage.getItem('tj_types')   || '["8-K","10-K","10-Q"]');
+let activeTickers = JSON.parse(localStorage.getItem('tj_tickers') || 'null'); // null = all on
+let lastFilings   = [];
+let lastEarnings  = [];
 
 window.onload = () => {
   renderSidebar();
   renderTypeToggles();
+  renderTickerFilters();
   const t = localStorage.getItem('tj_ntfy');
   if (t) document.getElementById('ntfyTopic').value = t;
 };
@@ -322,6 +342,40 @@ function renderSidebar() {
       </div>
       <button class="btn-x" onclick="removeCompany('${c.id}')">✕</button>
     </div>`).join('');
+  renderTickerFilters();
+}
+
+function renderTickerFilters() {
+  const el = document.getElementById('tickerFilters');
+  if (!el) return;
+  if (!companies.length) { el.innerHTML = '<div style="font-size:.65rem;color:var(--muted2)">Add companies first</div>'; return; }
+  // null means all active
+  const active = activeTickers || companies.map(c => c.ticker);
+  el.innerHTML = companies.map(c => `
+    <button class="tfilt${active.includes(c.ticker) ? ' on' : ''}"
+      onclick="toggleTicker('${c.ticker}')">${esc(c.ticker)}</button>`).join('');
+}
+
+function toggleTicker(ticker) {
+  // null = all on → clicking one deactivates others
+  const all = companies.map(c => c.ticker);
+  let active = activeTickers ? [...activeTickers] : [...all];
+  if (active.includes(ticker)) {
+    if (active.length === 1) {
+      // re-enable all if last one is deselected
+      active = [...all];
+    } else {
+      active = active.filter(t => t !== ticker);
+    }
+  } else {
+    active.push(ticker);
+  }
+  // If all are on, store null
+  activeTickers = active.length === all.length ? null : active;
+  localStorage.setItem('tj_tickers', JSON.stringify(activeTickers));
+  renderTickerFilters();
+  renderResults(lastEarnings);
+  renderFilings(lastFilings);
 }
 
 // ── FILING TYPE TOGGLES ────────────────────────────────────────────────────
@@ -378,6 +432,7 @@ async function runScan() {
     renderResults(earningsData.results);
 
     lastFilings = filingsData.results || [];
+    renderTickerFilters();
     renderFilings(lastFilings);
 
     // Notify confirmed dates
@@ -394,10 +449,13 @@ async function runScan() {
 
 // ── RENDER ─────────────────────────────────────────────────────────────────
 function renderResults(results) {
+  lastEarnings = results;
   const wrap = document.getElementById('resultsWrap');
-  if (!results.length) { wrap.innerHTML = ''; return; }
+  const active = activeTickers || companies.map(c => c.ticker);
+  const filtered = results.filter(r => active.includes(r.ticker));
+  if (!filtered.length) { wrap.innerHTML = ''; return; }
 
-  wrap.innerHTML = `<div class="results-table">${results.map((r, i) => {
+  wrap.innerHTML = `<div class="results-table">${filtered.map((r, i) => {
     const hasDate = !!r.date;
     const rowCls  = !hasDate ? 'not-found' : r.confirmed ? 'confirmed' : 'estimated';
     const badge   = !hasDate
@@ -422,15 +480,17 @@ function renderResults(results) {
   }).join('')}</div>`;
 }
 
+
 // ── RENDER FILINGS ─────────────────────────────────────────────────────────
 function renderFilings(results) {
   const wrap = document.getElementById('filingsWrap');
   if (!results.length) { wrap.innerHTML = ''; return; }
 
-  // Flatten all filings, filter by active types, sort by date desc
+  // Flatten all filings, filter by active types and active tickers, sort by date desc
+  const activeTicks = activeTickers || companies.map(c => c.ticker);
   const all = results.flatMap(r =>
     (r.filings || [])
-      .filter(f => activeTypes.includes(f.type))
+      .filter(f => activeTypes.includes(f.type) && activeTicks.includes(r.ticker))
       .map(f => ({ ...f, company: r.company, ticker: r.ticker }))
   ).sort((a, b) => b.date.localeCompare(a.date));
 
