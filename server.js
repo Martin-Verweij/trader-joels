@@ -27,24 +27,38 @@ const SKIP_PHRASES = [
   'reports earnings', 'reported', 'posted', 'stock price',
 ];
 
-// ── generic HTTPS GET ──────────────────────────────────────────────────────
-function httpGet(targetUrl, extraHeaders = {}) {
+// ── generic HTTPS GET with redirect following ──────────────────────────────
+function httpGet(targetUrl, extraHeaders = {}, redirects = 0) {
   return new Promise((resolve, reject) => {
-    const u = new URL(targetUrl);
-    https.get({
+    if (redirects > 5) { reject(new Error('Too many redirects')); return; }
+    const u   = new URL(targetUrl);
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request({
       hostname: u.hostname,
       path:     u.pathname + u.search,
+      method:   'GET',
       headers: {
         'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept':          'text/html,application/xml,*/*',
+        'Accept':          'text/html,application/xml,application/json,*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         ...extraHeaders,
       },
     }, res => {
+      if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
+        const next = res.headers.location.startsWith('http')
+          ? res.headers.location
+          : `${u.protocol}//${u.hostname}${res.headers.location}`;
+        res.resume();
+        resolve(httpGet(next, extraHeaders, redirects + 1));
+        return;
+      }
       let raw = '';
-      res.on('data', c => raw += c);
+      res.on('data', c => { raw += c; if (raw.length > 2_000_000) req.destroy(); });
       res.on('end', () => resolve({ status: res.statusCode, raw }));
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.end();
   });
 }
 
@@ -164,62 +178,6 @@ async function checkStockAnalysis(ticker) {
   return null;
 }
 
-// ── 3. Auto-discover IR page by guessing standard URL patterns ────────────
-// Most public companies use one of: investors.X.com / ir.X.com / investor.X.com
-// We derive the domain slug from the company name and try each pattern.
-async function checkIRPage(name, ticker) {
-  // Clean company name into a domain-friendly slug
-  // e.g. "Kopin Corp" → "kopin", "NVIDIA" → "nvidia", "Momentus" → "momentus"
-  const slug = name
-    .toLowerCase()
-    .replace(/(inc|corp|corporation|ltd|limited|group|holdings|co)\.?/g, '')
-    .replace(/[^a-z0-9]/g, '')
-    .trim();
-
-  const candidates = [
-    `https://investor.${slug}.com`,
-    `https://investors.${slug}.com`,
-    `https://ir.${slug}.com`,
-    `https://investor-relations.${slug}.com`,
-  ];
-
-  console.log(`  IR discovery for ${ticker}: trying ${candidates.length} URL patterns`);
-
-  for (const irUrl of candidates) {
-    try {
-      const { status, raw } = await httpGet(irUrl);
-      if (status !== 200) continue;
-      console.log(`  IR page found: ${irUrl}`);
-
-      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      const lower = text.toLowerCase();
-
-      const keywords = [
-        'earnings call', 'conference call', 'financial results',
-        'quarterly results', 'first quarter', 'second quarter',
-        'q1 ', 'q2 ', 'q3 ', 'q4 ',
-      ];
-
-      for (const kw of keywords) {
-        const idx = lower.indexOf(kw);
-        if (idx === -1) continue;
-        const chunk = text.slice(Math.max(0, idx - 50), idx + 200);
-        const found = extractFutureDate(chunk);
-        if (found) {
-          console.log(`  ✓ IR page: ${found.raw} near "${kw}" at ${irUrl}`);
-          return { date: found.raw, confirmed: true, source: `IR page`, url: irUrl };
-        }
-      }
-      console.log(`  IR page loaded but no future date found`);
-      // Still return the URL so user can check manually
-      return { date: null, confirmed: false, source: `IR page (no date found)`, url: irUrl };
-    } catch(_) {}
-  }
-
-  console.log(`  No IR page found for ${ticker}`);
-  return null;
-}
-
 // ── HTTP server ────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const parsed   = url.parse(req.url, true);
@@ -260,7 +218,6 @@ const server = http.createServer(async (req, res) => {
         try {
           let result = await checkGoogleNews(co.name, co.ticker);
           if (!result)  result = await checkStockAnalysis(co.ticker);
-          if (!result)  result = await checkIRPage(co.name, co.ticker);
           results.push({
             company:   co.name,
             ticker:    co.ticker,
@@ -337,11 +294,6 @@ const server = http.createServer(async (req, res) => {
       out.stockanalysis = { status, snippet: idx !== -1 ? text.slice(idx, idx+100) : 'NOT FOUND' };
     } catch(e) { out.stockanalysis = { error: e.message }; }
 
-    // IR page check
-    try {
-      const ir = await checkIRPage(ticker, ticker);
-      out.ir = ir || { result: 'nothing found' };
-    } catch(e) { out.ir = { error: e.message }; }
 
     send(200, out);
     return;
