@@ -82,11 +82,13 @@ const DATE_NO_YEAR  = /\b(?:january|february|march|april|may|june|july|august|se
 function extractFutureDate(text) {
   const now = new Date(); now.setHours(0,0,0,0);
   const yr  = now.getFullYear();
+  // Cap at 6 months — anything further is speculative analyst content, not an announcement
+  const cap = new Date(now); cap.setMonth(cap.getMonth() + 6);
   let earliest = null;
 
   const tryDate = (raw, d) => {
     if (isNaN(d)) return;
-    if (d >= now && (!earliest || d < earliest.date)) earliest = { date: d, raw };
+    if (d >= now && d <= cap && (!earliest || d < earliest.date)) earliest = { date: d, raw };
   };
 
   for (const m of text.matchAll(DATE_WITH_YEAR)) tryDate(m[0], new Date(m[0]));
