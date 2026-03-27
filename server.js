@@ -261,12 +261,15 @@ const server = http.createServer(async (req, res) => {
       out.rss = items.slice(0,5).map(i => ({ title: i.title, pubDate: i.pubDate }));
     } catch(e) { out.rss = { error: e.message }; }
 
-    // Yahoo check
+    // Yahoo JSON API check
     try {
-      const { status, raw } = await httpGet(`https://finance.yahoo.com/quote/${ticker}/`, { 'Accept-Language': 'en-US,en;q=0.9' });
-      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      const idx   = text.toLowerCase().indexOf('earnings date');
-      out.yahoo = { status, snippet: idx !== -1 ? text.slice(idx, idx+100) : 'NOT FOUND' };
+      const { status, raw } = await httpGet(
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents`,
+        { 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com' }
+      );
+      const json  = JSON.parse(raw);
+      const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate || [];
+      out.yahoo = { status, dates: dates.map(d => new Date(d.raw * 1000).toISOString()), raw_snippet: raw.slice(0, 200) };
     } catch(e) { out.yahoo = { error: e.message }; }
 
     // stockanalysis check
