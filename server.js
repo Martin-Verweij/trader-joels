@@ -164,87 +164,59 @@ async function checkStockAnalysis(ticker) {
   return null;
 }
 
-// ── 3. Auto-discover IR page via DuckDuckGo + scrape for earnings dates ──────
+// ── 3. Auto-discover IR page by guessing standard URL patterns ────────────
+// Most public companies use one of: investors.X.com / ir.X.com / investor.X.com
+// We derive the domain slug from the company name and try each pattern.
 async function checkIRPage(name, ticker) {
-  // Step 1: find the IR page URL via DuckDuckGo
-  const query = encodeURIComponent(`${ticker} ${name} investor relations earnings`);
-  const ddgUrl = `https://html.duckduckgo.com/html/?q=${query}`;
-  console.log(`  IR discovery: searching DuckDuckGo for ${ticker} IR page`);
+  // Clean company name into a domain-friendly slug
+  // e.g. "Kopin Corp" → "kopin", "NVIDIA" → "nvidia", "Momentus" → "momentus"
+  const slug = name
+    .toLowerCase()
+    .replace(/(inc|corp|corporation|ltd|limited|group|holdings|co)\.?/g, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
 
-  let irUrl = null;
-  try {
-    const { status, raw } = await httpGet(ddgUrl, {
-      'Accept': 'text/html',
-      'Accept-Language': 'en-US,en;q=0.9',
-    });
-    if (status !== 200) throw new Error(`DDG HTTP ${status}`);
-
-    // Extract result URLs — DDG HTML wraps them in <a class="result__url">
-    const urlMatches = raw.match(/href="(https?:\/\/(?:investors?|ir|investor-relations)[^"]+)"/gi) || [];
-    const candidates = urlMatches
-      .map(m => m.match(/href="([^"]+)"/)?.[1])
-      .filter(Boolean)
-      .filter(u => !u.includes('duckduckgo') && !u.includes('google'));
-
-    if (candidates.length > 0) {
-      irUrl = candidates[0];
-      console.log(`  IR candidate: ${irUrl}`);
-    } else {
-      // Fallback: try standard IR URL patterns
-      const domain = await guessIRDomain(ticker, name);
-      if (domain) irUrl = domain;
-    }
-  } catch(e) {
-    console.warn(`  DDG error: ${e.message}`);
-    const domain = await guessIRDomain(ticker, name);
-    if (domain) irUrl = domain;
-  }
-
-  if (!irUrl) return null;
-
-  // Step 2: fetch the IR page and look for earnings dates
-  console.log(`  Fetching IR page: ${irUrl}`);
-  try {
-    const { status, raw } = await httpGet(irUrl);
-    if (status !== 200) return null;
-
-    const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const lower = text.toLowerCase();
-
-    // Look for earnings/results/conference call keywords near a future date
-    const keywords = ['earnings call', 'conference call', 'financial results', 'quarterly results', 'q1', 'q2', 'first quarter', 'second quarter'];
-    for (const kw of keywords) {
-      const idx = lower.indexOf(kw);
-      if (idx === -1) continue;
-      const window = text.slice(Math.max(0, idx - 50), idx + 200);
-      const found  = extractFutureDate(window);
-      if (found) {
-        console.log(`  ✓ IR page: ${found.raw} near "${kw}"`);
-        return { date: found.raw, confirmed: true, source: `IR page (${irUrl})`, url: irUrl };
-      }
-    }
-    console.log(`  IR page fetched but no future date found`);
-  } catch(e) {
-    console.warn(`  IR page fetch error: ${e.message}`);
-  }
-  return null;
-}
-
-// Try common IR URL patterns as last resort
-async function guessIRDomain(ticker, name) {
-  // Use DuckDuckGo result domains — try common patterns
-  const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   const candidates = [
+    `https://investor.${slug}.com`,
     `https://investors.${slug}.com`,
     `https://ir.${slug}.com`,
-    `https://investor.${slug}.com`,
+    `https://investor-relations.${slug}.com`,
   ];
-  for (const u of candidates) {
+
+  console.log(`  IR discovery for ${ticker}: trying ${candidates.length} URL patterns`);
+
+  for (const irUrl of candidates) {
     try {
-      const { status } = await httpGet(u);
-      if (status === 200) { console.log(`  Guessed IR URL: ${u}`); return u; }
+      const { status, raw } = await httpGet(irUrl);
+      if (status !== 200) continue;
+      console.log(`  IR page found: ${irUrl}`);
+
+      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const lower = text.toLowerCase();
+
+      const keywords = [
+        'earnings call', 'conference call', 'financial results',
+        'quarterly results', 'first quarter', 'second quarter',
+        'q1 ', 'q2 ', 'q3 ', 'q4 ',
+      ];
+
+      for (const kw of keywords) {
+        const idx = lower.indexOf(kw);
+        if (idx === -1) continue;
+        const chunk = text.slice(Math.max(0, idx - 50), idx + 200);
+        const found = extractFutureDate(chunk);
+        if (found) {
+          console.log(`  ✓ IR page: ${found.raw} near "${kw}" at ${irUrl}`);
+          return { date: found.raw, confirmed: true, source: `IR page`, url: irUrl };
+        }
+      }
+      console.log(`  IR page loaded but no future date found`);
+      // Still return the URL so user can check manually
+      return { date: null, confirmed: false, source: `IR page (no date found)`, url: irUrl };
     } catch(_) {}
   }
+
+  console.log(`  No IR page found for ${ticker}`);
   return null;
 }
 
