@@ -359,20 +359,33 @@ const server = http.createServer(async (req, res) => {
       try {
         const { topic, title, message, url: clickUrl } = JSON.parse(body);
         if (!topic) { send(400, { error: 'Missing topic' }); return; }
-        const payload = Buffer.from(message || title || 'Earnings alert');
-        await new Promise((resolve, reject) => {
+        console.log(`  ntfy → topic: "${topic}", title: "${title}"`);
+        // Use topic as-is (no encodeURIComponent — ntfy expects raw path)
+        const ntfyPath = '/' + topic;
+        const payload  = Buffer.from(title || message || 'Earnings alert');
+        const ntfyRes  = await new Promise((resolve, reject) => {
           const r = https.request({
-            hostname: 'ntfy.sh', path: `/${encodeURIComponent(topic)}`, method: 'POST',
+            hostname: 'ntfy.sh',
+            path:     ntfyPath,
+            method:   'POST',
             headers: {
-              'Title': title || 'EarningsPulse', 'Content-Type': 'text/plain',
+              'Content-Type':   'text/plain',
               'Content-Length': payload.length,
               ...(clickUrl ? { 'Click': clickUrl } : {}),
             },
-          }, res => { res.resume(); resolve(); });
-          r.on('error', reject); r.write(payload); r.end();
+          }, res => {
+            let raw = '';
+            res.on('data', c => raw += c);
+            res.on('end', () => { console.log(`  ntfy response: ${res.statusCode} ${raw.slice(0,100)}`); resolve(res.statusCode); });
+          });
+          r.on('error', e => { console.error('  ntfy error:', e.message); reject(e); });
+          r.write(payload); r.end();
         });
-        send(200, { ok: true });
-      } catch(e) { send(502, { error: e.message }); }
+        send(200, { ok: true, ntfyStatus: ntfyRes });
+      } catch(e) {
+        console.error('  notify handler error:', e.message);
+        send(502, { error: e.message });
+      }
     });
     return;
   }
