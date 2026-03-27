@@ -106,15 +106,26 @@ async function checkGoogleNews(name, ticker) {
       if (status !== 200) continue;
       const items = parseRSS(raw);
 
+      // Pass 1: strict — upcoming phrase + future date (confirmed announcement)
       for (const item of items) {
         const title = item.title.toLowerCase();
         if (SKIP_PHRASES.some(p => title.includes(p))) continue;
         if (!UPCOMING_PHRASES.some(p => title.includes(p))) continue;
-
         const found = extractFutureDate(item.title);
         if (found) {
           console.log(`  ✓ confirmed: ${found.raw} via "${item.title}"`);
           return { date: found.raw, confirmed: true, source: item.title, url: item.link };
+        }
+      }
+      // Pass 2: loose — any earnings title with a future date
+      for (const item of items) {
+        const title = item.title.toLowerCase();
+        if (SKIP_PHRASES.some(p => title.includes(p))) continue;
+        if (!title.includes('earning')) continue;
+        const found = extractFutureDate(item.title);
+        if (found) {
+          console.log(`  ~ date in title: ${found.raw} via "${item.title}"`);
+          return { date: found.raw, confirmed: false, source: item.title, url: item.link };
         }
       }
     } catch(e) {
@@ -149,7 +160,26 @@ async function checkStockAnalysis(ticker) {
             console.log(`  Yahoo: ${str}`);
           }
         }
-      } catch(e) { console.warn(`  Yahoo error: ${e.message}`); }
+      } catch(e) {
+        console.warn(`  Yahoo API failed (${e.message}), trying HTML`);
+        try {
+          const { status, raw } = await httpGet(
+            `https://finance.yahoo.com/quote/${ticker}/`,
+            { 'Accept-Language': 'en-US,en;q=0.9' }
+          );
+          if (status === 200) {
+            const matches = [...raw.matchAll(/"earningsDate":\["(\d{4}-\d{2}-\d{2})"/g)];
+            for (const m of matches) {
+              const dt = new Date(m[1]);
+              if (dt >= now) {
+                const str = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                candidates.push({ date: str, dt, source: 'Yahoo Finance', url: `https://finance.yahoo.com/quote/${ticker}/` });
+                console.log(`  Yahoo HTML: ${str}`);
+              }
+            }
+          }
+        } catch(e2) { console.warn(`  Yahoo HTML failed: ${e2.message}`); }
+      }
     })(),
 
     // stockanalysis.com statistics page
