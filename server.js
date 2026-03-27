@@ -244,6 +244,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /api/debug/TICKER — shows exactly what each source returns
+  if (pathname.startsWith('/api/debug/') && req.method === 'GET') {
+    const ticker = pathname.split('/').pop().toUpperCase();
+    const out = { ticker, rss: null, yahoo: null, stockanalysis: null };
+
+    // RSS check
+    try {
+      const q = `${ticker} earnings call`;
+      const { raw } = await httpGet(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`);
+      const items = parseRSS(raw);
+      out.rss = items.slice(0,5).map(i => ({ title: i.title, pubDate: i.pubDate }));
+    } catch(e) { out.rss = { error: e.message }; }
+
+    // Yahoo check
+    try {
+      const { status, raw } = await httpGet(`https://finance.yahoo.com/quote/${ticker}/`, { 'Accept-Language': 'en-US,en;q=0.9' });
+      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const idx   = text.toLowerCase().indexOf('earnings date');
+      out.yahoo = { status, snippet: idx !== -1 ? text.slice(idx, idx+100) : 'NOT FOUND' };
+    } catch(e) { out.yahoo = { error: e.message }; }
+
+    // stockanalysis check
+    try {
+      const { status, raw } = await httpGet(`https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`);
+      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const idx   = text.toLowerCase().indexOf('next earnings');
+      out.stockanalysis = { status, snippet: idx !== -1 ? text.slice(idx, idx+100) : 'NOT FOUND' };
+    } catch(e) { out.stockanalysis = { error: e.message }; }
+
+    send(200, out);
+    return;
+  }
+
   send(404, { error: 'Not found' });
 });
 
