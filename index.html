@@ -435,9 +435,15 @@ async function runScan() {
     renderTickerFilters();
     renderFilings(lastFilings);
 
-    // Notify confirmed dates
-    const confirmed = earningsData.results.filter(r => r.date && r.confirmed);
-    for (const r of confirmed) notifyDate(r);
+    // Only notify for confirmed dates that weren't known before
+    const prevConfirmed = JSON.parse(localStorage.getItem('tj_prev_confirmed') || '{}');
+    const newConfirmed  = {};
+    for (const r of earningsData.results) {
+      if (!r.date || !r.confirmed) continue;
+      newConfirmed[r.ticker] = r.date;
+      if (prevConfirmed[r.ticker] !== r.date) notifyDate(r); // new or changed
+    }
+    localStorage.setItem('tj_prev_confirmed', JSON.stringify(newConfirmed));
   } catch(e) {
     status.textContent = 'Scan failed';
     status.classList.remove('active');
