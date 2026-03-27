@@ -14,26 +14,41 @@ const url   = require('url');
 
 const PORT = process.env.PORT || 3456;
 
-const DATE_PATTERN = /(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?=\b)/gi;
+// Matches dates with year: "March 27, 2026" / "Mar 27 2026" / "3/27/2026"
+const DATE_PATTERN = /(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi;
 
-// ── Find earliest future date string from text, inferring year if missing ──
+// Matches dates WITHOUT year: "April 6" / "April 6th"
+const DATE_NO_YEAR = /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi;
+
+// ── Find earliest future date string from text ─────────────────────────────
 function extractFutureDate(text) {
-  const now  = new Date(); now.setHours(0,0,0,0);
-  const yr   = now.getFullYear();
+  const now = new Date(); now.setHours(0,0,0,0);
+  const yr  = now.getFullYear();
   let earliest = null;
-  for (const m of text.matchAll(DATE_PATTERN)) {
-    const raw     = m[0];
-    const hasYear = /\d{4}/.test(raw);
-    let d = new Date(raw);
-    if (!hasYear || isNaN(d)) {
-      d = new Date(`${raw} ${yr}`);
-      if (isNaN(d) || d < now) d = new Date(`${raw} ${yr + 1}`);
-    }
-    if (isNaN(d)) continue;
+
+  const tryDate = (raw, d) => {
+    if (isNaN(d)) return;
     if (d >= now && (!earliest || d < earliest.date)) {
-      earliest = { date: d, raw: hasYear ? raw : `${raw} ${d.getFullYear()}` };
+      earliest = { date: d, raw };
     }
+  };
+
+  // Dates with year — reliable
+  for (const m of text.matchAll(DATE_PATTERN)) {
+    tryDate(m[0], new Date(m[0]));
   }
+
+  // Dates without year — infer current or next year
+  for (const m of text.matchAll(DATE_NO_YEAR)) {
+    // Skip if this match is actually part of a longer date-with-year
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 10);
+    if (/,?\s*\d{4}/.test(after)) continue;
+    const withYr = `${m[0]} ${yr}`;
+    let d = new Date(withYr);
+    if (isNaN(d) || d < now) d = new Date(`${m[0]} ${yr + 1}`);
+    tryDate(`${m[0]} ${d.getFullYear()}`, d);
+  }
+
   return earliest;
 }
 
