@@ -14,78 +14,24 @@ const url   = require('url');
 
 const PORT = process.env.PORT || 3456;
 
-const DATE_PATTERN = /(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi;
+const DATE_PATTERN = /(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?=\b)/gi;
 
-const UPCOMING_PHRASES = [
-  'to host', 'to report', 'to release', 'to announce', 'will host',
-  'will report', 'will release', 'will announce', 'scheduled', 'upcoming',
-  'conference call', 'webcast', 'announces date', 'sets date',
-];
-
-const SKIP_PHRASES = [
-  'transcript', 'highlights', 'recap', 'miss', 'beat', 'drops', 'rises',
-  'reports earnings', 'reported', 'posted', 'stock price',
-];
-
-// ── generic HTTPS GET with redirect following ──────────────────────────────
-function httpGet(targetUrl, extraHeaders = {}, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    if (redirects > 5) { reject(new Error('Too many redirects')); return; }
-    const u   = new URL(targetUrl);
-    const lib = u.protocol === 'https:' ? https : http;
-    const req = lib.request({
-      hostname: u.hostname,
-      path:     u.pathname + u.search,
-      method:   'GET',
-      headers: {
-        'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept':          'text/html,application/xml,application/json,*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        ...extraHeaders,
-      },
-    }, res => {
-      if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
-        const next = res.headers.location.startsWith('http')
-          ? res.headers.location
-          : `${u.protocol}//${u.hostname}${res.headers.location}`;
-        res.resume();
-        resolve(httpGet(next, extraHeaders, redirects + 1));
-        return;
-      }
-      let raw = '';
-      res.on('data', c => { raw += c; if (raw.length > 2_000_000) req.destroy(); });
-      res.on('end', () => resolve({ status: res.statusCode, raw }));
-    });
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.end();
-  });
-}
-
-// ── Parse RSS XML ──────────────────────────────────────────────────────────
-function parseRSS(xml) {
-  const items = [];
-  for (const block of (xml.match(/<item>([\s\S]*?)<\/item>/gi) || [])) {
-    const get = tag => {
-      const m = block.match(new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i'))
-             || block.match(new RegExp(`<${tag}[^>]*>([^<]*)<\\/${tag}>`, 'i'));
-      return m ? m[1].trim() : '';
-    };
-    items.push({ title: get('title'), link: get('link'), pubDate: get('pubDate') });
-  }
-  return items;
-}
-
-// ── Find earliest future date string from text ─────────────────────────────
+// ── Find earliest future date string from text, inferring year if missing ──
 function extractFutureDate(text) {
-  const now   = new Date();
-  now.setHours(0, 0, 0, 0);
+  const now  = new Date(); now.setHours(0,0,0,0);
+  const yr   = now.getFullYear();
   let earliest = null;
   for (const m of text.matchAll(DATE_PATTERN)) {
-    const d = new Date(m[0]);
+    const raw     = m[0];
+    const hasYear = /\d{4}/.test(raw);
+    let d = new Date(raw);
+    if (!hasYear || isNaN(d)) {
+      d = new Date(`${raw} ${yr}`);
+      if (isNaN(d) || d < now) d = new Date(`${raw} ${yr + 1}`);
+    }
     if (isNaN(d)) continue;
     if (d >= now && (!earliest || d < earliest.date)) {
-      earliest = { date: d, raw: m[0] };
+      earliest = { date: d, raw: hasYear ? raw : `${raw} ${d.getFullYear()}` };
     }
   }
   return earliest;
