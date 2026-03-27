@@ -110,40 +110,53 @@ async function checkGoogleNews(name, ticker) {
   return null;
 }
 
-// ── 2. stockanalysis.com fallback ──────────────────────────────────────────
+// ── 2. Fallback chain: Yahoo Finance → stockanalysis.com ──────────────────
 async function checkStockAnalysis(ticker) {
-  const pageUrl = `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`;
-  console.log(`  Fallback: ${pageUrl}`);
+  // Try Yahoo Finance first — embeds earnings date directly in raw HTML
+  const yahooUrl = `https://finance.yahoo.com/quote/${ticker}/`;
+  console.log(`  Fallback Yahoo: ${yahooUrl}`);
   try {
-    const { status, raw } = await httpGet(pageUrl);
-    if (status !== 200) return null;
+    const { status, raw } = await httpGet(yahooUrl, { 'Accept-Language': 'en-US,en;q=0.9' });
+    if (status === 200) {
+      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const lower = text.toLowerCase();
+      const idx   = lower.indexOf('earnings date');
+      if (idx !== -1) {
+        const snippet = text.slice(idx, idx + 80);
+        const found   = extractFutureDate(snippet);
+        if (found) {
+          console.log(`  ✓ confirmed: ${found.raw} from Yahoo Finance`);
+          return { date: found.raw, confirmed: true, source: 'Yahoo Finance', url: yahooUrl };
+        }
+      }
+    }
+  } catch(e) {
+    console.warn(`  Yahoo Finance error: ${e.message}`);
+  }
 
-    // Search for earnings date phrases — statistics page has both confirmed and estimated
-    const text = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const lower = text.toLowerCase();
-
-    // Try phrases in order of specificity
-    const phrases = [
-      'next estimated earnings date',
-      'next earnings date',
-      'next earnings',
-      'upcoming earnings',
-    ];
-
-    for (const phrase of phrases) {
-      const idx = lower.indexOf(phrase);
-      if (idx === -1) continue;
-      const snippet = text.slice(idx, idx + 150);
-      const found   = extractFutureDate(snippet);
-      if (found) {
-        const isEstimate = phrase.includes('estimated') || phrase === 'next earnings';
-        console.log(`  ✓ ${isEstimate ? 'estimate' : 'confirmed'}: ${found.raw} from stockanalysis.com`);
-        return { date: found.raw, confirmed: !isEstimate, source: 'stockanalysis.com', url: pageUrl };
+  // Try stockanalysis.com statistics page as second fallback
+  const saUrl = `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/statistics/`;
+  console.log(`  Fallback stockanalysis: ${saUrl}`);
+  try {
+    const { status, raw } = await httpGet(saUrl);
+    if (status === 200) {
+      const text  = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const lower = text.toLowerCase();
+      for (const phrase of ['next estimated earnings date', 'next earnings date', 'next earnings']) {
+        const idx = lower.indexOf(phrase);
+        if (idx === -1) continue;
+        const found = extractFutureDate(text.slice(idx, idx + 150));
+        if (found) {
+          const isEstimate = phrase.includes('estimated');
+          console.log(`  ✓ ${isEstimate ? 'estimate' : 'confirmed'}: ${found.raw} from stockanalysis.com`);
+          return { date: found.raw, confirmed: !isEstimate, source: 'stockanalysis.com', url: saUrl };
+        }
       }
     }
   } catch(e) {
     console.warn(`  stockanalysis error: ${e.message}`);
   }
+
   return null;
 }
 
